@@ -5,10 +5,12 @@ import httplib2
 import cElementTree as ElementTree
 from XmlDictConfig import XmlDictConfig
 import simplejson
+import time
 
 urls = (
     '/xml/(.*)', 'NSAPI',
-    '/json/(.*)','ToJSON'
+    '/json/(.*)','ToJSON',
+    '/irail/stations', 'ToIrailStations',
 )
 
 app = web.application(urls,globals())
@@ -48,5 +50,41 @@ class ToJSON(NSAPI):
         xmldict = XmlDictConfig(root)
         web.header('Content-Type', 'application/json')
         return simplejson.dumps(xmldict)
+
+class ToIrailStations(NSAPI):
+    def GET(self):
+        return NSAPI.GET(self, "/ns-api-stations")
+
+    def processor(self, content):
+        root = ElementTree.XML(content)
+        dstations = {}
+        stations = root.findall('Station')
+        for station in stations:
+            if station.find('Land').text == 'NL':
+                code = station.find('code').text
+                if code not in dstations:
+                    dstations[code] = {'alias': []}
+                if station.find('Alias').text == 'true':
+                    dstations[code]['alias'].append(station.find('Naam'))
+                else:
+                    dstations[code]['defaultname'].append(station.find('Naam'))
+                    dstations[code]['locationX'] = station.find('Lat')
+                    dstations[code]['locationY'] = station.find('Long')
+                    dstations[code]['alias'].append(station.find('Naam'))
+
+        root = ElementTree.Element('stations')
+        root.attrib['timestamp'] = int(time.time())
+
+        for station in dstations:
+            for alias in station['alias']:
+                sub = ElementTree.SubElement(root, 'station')
+                sub.attrib['locationX'] = station['locationX']
+                sub.attrib['locationY'] = station['locationY']
+                sub.attrib['defaultname'] = station['defaultname']
+                sub.text = alias
+
+        web.header('Content-Type', 'application/xml')
+        return ElementTree.tostring(root)
+
 
 application = app.wsgifunc()
