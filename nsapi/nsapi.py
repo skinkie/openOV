@@ -34,7 +34,7 @@ class NSAPI:
             if resp['status'] == '200':
 	    	return self.processor(content)
 	    if resp['status'] == '404':
-	        return '404 Not Found'
+	        return web.notfound()
             else:
                 authreq = True
         if authreq:
