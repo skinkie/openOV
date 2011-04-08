@@ -58,24 +58,24 @@ class ToIrailStations(NSAPI):
     def processor(self, content):
         root = ElementTree.XML(content)
         dstations = {}
-        stations = root.findall('Station')
+        stations = root.findall('.//station')
         for station in stations:
-            if station.find('Land').text == 'NL':
-                code = station.find('code').text
+            if station.find('.//country').text == 'NL':
+                code = station.find('.//code').text
                 if code not in dstations:
-                    dstations[code] = {'alias': []}
-                if station.find('Alias').text == 'true':
-                    dstations[code]['alias'].append(station.find('Naam'))
+                    dstations[code] = {'alias': [], 'defaultname': '', 'locationX': '', 'locationY': ''}
+                if station.find('.//alias').text == 'true':
+                    dstations[code]['alias'].append(station.find('.//name').text)
                 else:
-                    dstations[code]['defaultname'].append(station.find('Naam'))
-                    dstations[code]['locationX'] = station.find('Lat')
-                    dstations[code]['locationY'] = station.find('Long')
-                    dstations[code]['alias'].append(station.find('Naam'))
+                    dstations[code]['defaultname'] = station.find('.//name').text
+                    dstations[code]['locationX'] = station.find('.//lat').text
+                    dstations[code]['locationY'] = station.find('.//long').text
+                    dstations[code]['alias'].append(station.find('.//name').text)
 
         root = ElementTree.Element('stations')
-        root.attrib['timestamp'] = int(time.time())
+        root.attrib['timestamp'] = str(int(time.time()))
 
-        for station in dstations:
+        for station in dstations.values():
             for alias in station['alias']:
                 sub = ElementTree.SubElement(root, 'station')
                 sub.attrib['locationX'] = station['locationX']
