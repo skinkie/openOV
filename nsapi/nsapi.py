@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import web
 import base64
 import re
@@ -6,20 +8,36 @@ import cElementTree as ElementTree
 from XmlDictConfig import XmlDictConfig
 import simplejson
 import time
+import codecs
 
 urls = (
     '/xml/(.*)', 'NSAPI',
     '/json/(.*)','ToJSON',
     '/irail/stations', 'ToIrailStations',
+    '/irail/liveboard(.*)', 'ToIrailLiveboard',
 )
 
 app = web.application(urls,globals())
+
+# Objects that should be made on time:
+global dstations
+dstations = {}
 
 class NSAPI:
     def processor(self, content):
         return content
 
     def GET(self, request):
+        cacheOutput = False
+        if request in ['ns-api-stations']:
+            f = codecs.open('/tmp/'+request, 'r', 'utf-8')
+            if f:
+                content = f.read().encode('utf-8')
+                f.close()
+                if len(content) > 0:
+                    return self.processor(content)
+            cacheOutput = True
+
         auth = web.ctx.env.get('HTTP_AUTHORIZATION')
         authreq = False
         if auth is None:
@@ -31,7 +49,12 @@ class NSAPI:
             h = httplib2.Http()
             h.debuglevel = 1
             h.add_credentials(username, password)
-            resp, content = h.request("https://webservices.ns.nl/"+request)
+            resp, content = h.request("https://webservices.ns.nl/"+request+web.ctx.query)
+
+            if cacheOutput == True:
+                f = codecs.open('/tmp/'+request, encoding='utf-8', mode='w')
+                f.write(content)
+                f.close()
 
             if resp['status'] == '200':
                 return self.processor(content)
@@ -53,24 +76,24 @@ class ToJSON(NSAPI):
 
 class ToIrailStations(NSAPI):
     def GET(self):
-        return NSAPI.GET(self, "/ns-api-stations")
+        return NSAPI.GET(self, "ns-api-stations")
 
     def processor(self, content):
-        root = ElementTree.XML(content)
-        dstations = {}
-        stations = root.findall('.//station')
-        for station in stations:
-            if station.find('.//country').text == 'NL':
-                code = station.find('.//code').text
-                if code not in dstations:
-                    dstations[code] = {'alias': [], 'defaultname': '', 'locationX': '', 'locationY': ''}
-                if station.find('.//alias').text == 'true':
-                    dstations[code]['alias'].append(station.find('.//name').text)
-                else:
-                    dstations[code]['defaultname'] = station.find('.//name').text
-                    dstations[code]['locationX'] = station.find('.//lat').text
-                    dstations[code]['locationY'] = station.find('.//long').text
-                    dstations[code]['alias'].append(station.find('.//name').text)
+        if len(dstations) == 0:
+            root = ElementTree.XML(content)
+            stations = root.findall('.//station')
+            for station in stations:
+                if station.find('.//country').text == 'NL':
+                    code = station.find('.//code').text
+                    if code not in dstations:
+                        dstations[code] = {'alias': [], 'defaultname': '', 'locationX': '', 'locationY': ''}
+                    if station.find('.//alias').text == 'true':
+                        dstations[code]['alias'].append(station.find('.//name').text)
+                    else:
+                        dstations[code]['defaultname'] = station.find('.//name').text
+                        dstations[code]['locationX'] = station.find('.//lat').text
+                        dstations[code]['locationY'] = station.find('.//long').text
+                        dstations[code]['alias'].append(station.find('.//name').text)
 
         root = ElementTree.Element('stations')
         root.attrib['timestamp'] = str(int(time.time()))
@@ -86,5 +109,86 @@ class ToIrailStations(NSAPI):
         web.header('Content-Type', 'application/xml')
         return ElementTree.tostring(root)
 
+class ToIrailLiveboard(NSAPI):
+    def __init__(self):
+        station = ''
+
+    def GET(self, station):
+        user_data = web.input()
+        self.station = user_data.station
+        web.ctx.query = ''
+        return NSAPI.GET(self, "ns-api-avt?station="+self.station)
+
+    def getStationFromCache(name):
+        name = name.lower()
+        for (code, station) in dstations.iter():
+            if name == code.lower() or name == station['defaultname'].lower() or name == station['alias'].lower():
+                return station
+
+        return None
+
+    def renderStation(self, root, name):
+        station = self.getStationFromCache(self.station)
+        sub = ElementTree.SubElement(root, 'station')
+        if station is not None:
+            sub.attrib['locationX'] = needle['locationX']
+            sub.attrib['locationY'] = needle['locationY']
+            sub.attrib['defaultname'] = needle['defaultname']
+        sub.text = self.station
+
+    def processor(self, content):
+        # XSLT was invented for these kind of transformations
+        
+        dtreinen = []
+        root = ElementTree.XML(content)
+        treinen = root.findall('.//VertrekkendeTrein')
+        for trein in treinen:
+            result = {}
+            result['vertrektijd'] = trein.find('.//VertrekTijd').text
+            spoor = trein.find('.//VertrekSpoor')
+            result['spoor'] = spoor.text
+            result['spoorwijziging'] = spoor.attrib['wijziging']
+            result['station'] = trein.find('.//EindBestemming')
+            result['type'] = trein.find('.//TreinSoort')
+
+            vertraging = trein.find('.//VetrekVertragingTekst')
+            if vertraging:
+                result['vertraging'] = vertraging.text
+
+            dtreinen.append(result)
+
+        root = ElementTree.Element('liveboard')
+        root.attrib['version'] = "1.0"
+        root.attrib['timestamp'] = str(int(time.time()))
+
+        self.renderStation(root, self.station)
+
+        departures = ElementTree.SubElement(root, 'departures')
+        departures.attrib['number'] = len(dtreinen)
+
+        for trein in dtreinen:
+            departure = ElementTree.SubElement(departures, 'departure')
+            if 'vertraging' in trein:
+                departure.attrib['delay'] = trein['vertraging']
+
+            renderStation(departure, self.station)
+
+            if 'type' in trein:
+                sub = ElementTree.SubElement(root, 'vehicle')
+                sub.text = trein['type']
+            
+            if 'vertrektijd' in trein:
+                sub = ElementTree.SubElement(root, 'time')
+                sub.attrib['formatted'] = 'iso8601'
+                sub.text = trein['vertrektijd']
+
+            if 'spoor' in trein:
+                sub = ElementTree.SubElement(root, 'platform')
+                sub.text = trein['spoor']
+
+                if 'spoorwijziging' in trein:
+                    sub.attrib['change'] = trein['spoorwijziging']
+
+        return ElementTree.tostring(root)
 
 application = app.wsgifunc()
