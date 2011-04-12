@@ -119,10 +119,12 @@ class ToIrailLiveboard(NSAPI):
         web.ctx.query = ''
         return NSAPI.GET(self, "ns-api-avt?station="+self.station)
 
-    def getStationFromCache(name):
+    def getStationFromCache(self, name):
         name = name.lower()
-        for (code, station) in dstations.iter():
-            if name == code.lower() or name == station['defaultname'].lower() or name == station['alias'].lower():
+        for (code, station) in dstations.items():
+            if name == code.lower() or name == station['defaultname'].lower():
+                return station
+            elif name in sorted(station['alias'], key=str.lower):
                 return station
 
         return None
@@ -131,9 +133,9 @@ class ToIrailLiveboard(NSAPI):
         station = self.getStationFromCache(self.station)
         sub = ElementTree.SubElement(root, 'station')
         if station is not None:
-            sub.attrib['locationX'] = needle['locationX']
-            sub.attrib['locationY'] = needle['locationY']
-            sub.attrib['defaultname'] = needle['defaultname']
+            sub.attrib['locationX'] = station['locationX']
+            sub.attrib['locationY'] = station['locationY']
+            sub.attrib['defaultname'] = station['defaultname']
         sub.text = self.station
 
     def processor(self, content):
@@ -149,7 +151,10 @@ class ToIrailLiveboard(NSAPI):
             result['spoor'] = spoor.text
             result['spoorwijziging'] = spoor.attrib['wijziging']
             result['station'] = trein.find('.//EindBestemming')
-            result['type'] = trein.find('.//TreinSoort')
+
+            vehicle = trein.find('.//TreinSoort')
+            if vehicle is not None:
+                result['type'] = vehicle.text
 
             vertraging = trein.find('.//VetrekVertragingTekst')
             if vertraging:
@@ -164,26 +169,26 @@ class ToIrailLiveboard(NSAPI):
         self.renderStation(root, self.station)
 
         departures = ElementTree.SubElement(root, 'departures')
-        departures.attrib['number'] = len(dtreinen)
+        departures.attrib['number'] = str(len(dtreinen))
 
         for trein in dtreinen:
             departure = ElementTree.SubElement(departures, 'departure')
             if 'vertraging' in trein:
                 departure.attrib['delay'] = trein['vertraging']
 
-            renderStation(departure, self.station)
+            self.renderStation(departure, self.station)
 
             if 'type' in trein:
-                sub = ElementTree.SubElement(root, 'vehicle')
+                sub = ElementTree.SubElement(departure, 'vehicle')
                 sub.text = trein['type']
             
             if 'vertrektijd' in trein:
-                sub = ElementTree.SubElement(root, 'time')
+                sub = ElementTree.SubElement(departure, 'time')
                 sub.attrib['formatted'] = 'iso8601'
                 sub.text = trein['vertrektijd']
 
             if 'spoor' in trein:
-                sub = ElementTree.SubElement(root, 'platform')
+                sub = ElementTree.SubElement(departure, 'platform')
                 sub.text = trein['spoor']
 
                 if 'spoorwijziging' in trein:
