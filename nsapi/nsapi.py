@@ -9,6 +9,7 @@ from XmlDictConfig import XmlDictConfig
 import simplejson
 import time
 import codecs
+import iso8601
 
 urls = (
     '/xml/(.*)', 'NSAPI',
@@ -140,6 +141,7 @@ class ToIrailLiveboard(NSAPI):
 
     def processor(self, content):
         # XSLT was invented for these kind of transformations
+	# TODO: RitNummer
         
         dtreinen = []
         root = ElementTree.XML(content)
@@ -156,9 +158,13 @@ class ToIrailLiveboard(NSAPI):
             if vehicle is not None:
                 result['type'] = vehicle.text
 
-            vertraging = trein.find('.//VetrekVertragingTekst')
+            vertraging = trein.find('.//VertrekVertragingTekst')
             if vertraging:
                 result['vertraging'] = vertraging.text
+            
+	    ritnummer = trein.find('.//RitNummer')
+            if ritnummer:
+                result['ritnummer'] = ritnummer.text
 
             dtreinen.append(result)
 
@@ -180,12 +186,12 @@ class ToIrailLiveboard(NSAPI):
 
             if 'type' in trein:
                 sub = ElementTree.SubElement(departure, 'vehicle')
-                sub.text = trein['type']
+                sub.text = 'NL.NS.'+trein['type']
             
             if 'vertrektijd' in trein:
                 sub = ElementTree.SubElement(departure, 'time')
-                sub.attrib['formatted'] = 'iso8601'
-                sub.text = trein['vertrektijd']
+                sub.attrib['formatted'] = trein['vertrektijd']
+                sub.text = str(int(time.mktime(iso8601.parse_date(trein['vertrektijd']).timetuple())))
 
             if 'spoor' in trein:
                 sub = ElementTree.SubElement(departure, 'platform')
